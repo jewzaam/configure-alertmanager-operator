@@ -2,12 +2,11 @@ package secret
 
 import (
 	"context"
-	"fmt"
-	"reflect"
 	"testing"
 
 	"github.com/openshift/configure-alertmanager-operator/config"
 	alertmanager "github.com/openshift/configure-alertmanager-operator/pkg/types"
+	"github.com/openshift/configure-alertmanager-operator/pkg/utility"
 	yaml "gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,7 +29,7 @@ func readAlertManagerConfig(r *ReconcileSecret, request *reconcile.Request) *ale
 	// Define a new objectKey for fetching the alertmanager config.
 	objectKey := client.ObjectKey{
 		Namespace: request.Namespace,
-		Name:      secretNameAlertmanager,
+		Name:      config.SecretNameAlertmanager,
 	}
 
 	// Fetch the alertmanager config and load it into an alertmanager.Config struct.
@@ -42,265 +41,6 @@ func readAlertManagerConfig(r *ReconcileSecret, request *reconcile.Request) *ale
 	}
 
 	return amconfig
-}
-
-func assertEquals(t *testing.T, want interface{}, got interface{}, message string) {
-	if reflect.DeepEqual(got, want) {
-		return
-	}
-
-	if len(message) == 0 {
-		message = fmt.Sprintf("Expected '%v' but got '%v'", want, got)
-	} else {
-		message = fmt.Sprintf("%s: Expected '%v' but got '%v'", message, want, got)
-	}
-	t.Fatal(message)
-}
-
-func assertNotEquals(t *testing.T, want interface{}, got interface{}, message string) {
-	if !reflect.DeepEqual(got, want) {
-		return
-	}
-	if len(message) == 0 {
-		message = fmt.Sprintf("Didn't expect '%v'", want)
-	} else {
-		message = fmt.Sprintf("%s: Expected '%v' but got '%v'", message, want, got)
-	}
-	t.Fatal(message)
-}
-
-func assertGte(t *testing.T, want int, got int, message string) {
-	if want <= got {
-		return
-	}
-	if len(message) == 0 {
-		message = fmt.Sprintf("Expected '%v' but got '%v'", want, got)
-	} else {
-		message = fmt.Sprintf("%s: Expected '%v' but got '%v'", message, want, got)
-	}
-	t.Fatal(message)
-}
-
-func assertTrue(t *testing.T, status bool, message string) {
-	if status {
-		return
-	}
-	t.Fatal(message)
-}
-
-// utility class to test PD route creation
-func verifyPagerdutyRoute(t *testing.T, route *alertmanager.Route) {
-	assertEquals(t, defaultReceiver, route.Receiver, "Reciever Name")
-	assertEquals(t, true, route.Continue, "Continue")
-	assertEquals(t, []string{"alertname", "severity"}, route.GroupByStr, "GroupByStr")
-	assertGte(t, 1, len(route.Routes), "Number of Routes")
-
-	// verify we have the core routes for namespace, ES, and fluentd
-	hasNamespace := false
-	hasElasticsearch := false
-	hasFluentd := false
-	for _, route := range route.Routes {
-		if route.MatchRE["namespace"] == alertmanager.PDRegex {
-			hasNamespace = true
-		} else if route.Match["job"] == "fluentd" {
-			hasFluentd = true
-		} else if route.Match["cluster"] == "elasticsearch" {
-			hasElasticsearch = true
-		}
-	}
-
-	assertTrue(t, hasNamespace, "No route for MatchRE on namespace")
-	assertTrue(t, hasElasticsearch, "No route for Match on cluster=elasticsearch")
-	assertTrue(t, hasFluentd, "No route for Match on job=fluentd")
-}
-
-func verifyNullReceiver(t *testing.T, receivers []*alertmanager.Receiver) {
-	hasNull := false
-	for _, receiver := range receivers {
-		if receiver.Name == receiverNull {
-			hasNull = true
-			assertEquals(t, 0, len(receiver.PagerdutyConfigs), "Empty PagerdutyConfigs")
-		}
-	}
-	assertTrue(t, hasNull, fmt.Sprintf("No '%s' receiver", receiverNull))
-}
-
-// utility function to verify Pagerduty Receivers
-func verifyPagerdutyReceivers(t *testing.T, key string, receivers []*alertmanager.Receiver) {
-	// there are at least 3 receivers: namespace, elasticsearch, and fluentd
-	assertGte(t, 2, len(receivers), "Number of Receivers")
-
-	// verify structure of each
-	hasMakeItWarning := false
-	hasPagerduty := false
-	for _, receiver := range receivers {
-		switch receiver.Name {
-		case receiverMakeItWarning:
-			hasMakeItWarning = true
-			assertEquals(t, true, receiver.PagerdutyConfigs[0].NotifierConfig.VSendResolved, "VSendResolved")
-			assertEquals(t, key, receiver.PagerdutyConfigs[0].RoutingKey, "RoutingKey")
-			assertEquals(t, "warning", receiver.PagerdutyConfigs[0].Severity, "Severity")
-		case receiverPagerduty:
-			hasPagerduty = true
-			assertEquals(t, true, receiver.PagerdutyConfigs[0].NotifierConfig.VSendResolved, "VSendResolved")
-			assertEquals(t, key, receiver.PagerdutyConfigs[0].RoutingKey, "RoutingKey")
-			assertTrue(t, receiver.PagerdutyConfigs[0].Severity != "", "Non empty Severity")
-			assertNotEquals(t, "warning", receiver.PagerdutyConfigs[0].Severity, "Severity")
-		}
-	}
-
-	assertTrue(t, hasMakeItWarning, fmt.Sprintf("No '%s' receiver", receiverMakeItWarning))
-	assertTrue(t, hasPagerduty, fmt.Sprintf("No '%s' receiver", receiverPagerduty))
-}
-
-// utility function to verify watchdog route
-func verifyWatchdogRoute(t *testing.T, route *alertmanager.Route) {
-	assertEquals(t, receiverWatchdog, route.Receiver, "Reciever Name")
-	assertEquals(t, "5m", route.RepeatInterval, "Repeat Interval")
-	assertEquals(t, "Watchdog", route.Match["alertname"], "Alert Name")
-}
-
-// utility to test watchdog receivers
-func verifyWatchdogReceiver(t *testing.T, url string, receivers []*alertmanager.Receiver) {
-	// there is 1 receiver
-	assertGte(t, 1, len(receivers), "Number of Receivers")
-
-	// verify structure of each
-	hasWatchdog := false
-	for _, receiver := range receivers {
-		if receiver.Name == receiverWatchdog {
-			hasWatchdog = true
-			assertTrue(t, receiver.WebhookConfigs[0].VSendResolved, "VSendResolved")
-			assertEquals(t, url, receiver.WebhookConfigs[0].URL, "URL")
-		}
-	}
-
-	assertTrue(t, hasWatchdog, fmt.Sprintf("No '%s' receiver", receiverWatchdog))
-}
-
-func Test_createPagerdutyRoute(t *testing.T) {
-	// test the structure of the Route is sane
-	route := createPagerdutyRoute()
-
-	verifyPagerdutyRoute(t, route)
-}
-
-func Test_createPagerdutyReceivers_WithoutKey(t *testing.T) {
-	assertEquals(t, 0, len(createPagerdutyReceivers("")), "Number of Receivers")
-}
-
-func Test_createPagerdutyReceivers_WithKey(t *testing.T) {
-	key := "abcdefg1234567890"
-
-	receivers := createPagerdutyReceivers(key)
-
-	verifyPagerdutyReceivers(t, key, receivers)
-}
-
-func Test_createWatchdogRoute(t *testing.T) {
-	// test the structure of the Route is sane
-	route := createWatchdogRoute()
-
-	verifyWatchdogRoute(t, route)
-}
-
-func Test_createWatchdogReceivers_WithoutURL(t *testing.T) {
-	assertEquals(t, 0, len(createWatchdogReceivers("")), "Number of Receivers")
-}
-
-func Test_createWatchdogReceivers_WithKey(t *testing.T) {
-	url := "http://whatever/something"
-
-	receivers := createWatchdogReceivers(url)
-
-	verifyWatchdogReceiver(t, url, receivers)
-}
-
-func Test_createAlertManagerConfig_WithoutKey_WithoutURL(t *testing.T) {
-	pdKey := ""
-	wdURL := ""
-
-	config := createAlertManagerConfig(pdKey, wdURL)
-
-	// verify static things
-	assertEquals(t, "5m", config.Global.ResolveTimeout, "Global.ResolveTimeout")
-	assertEquals(t, pagerdutyURL, config.Global.PagerdutyURL, "Global.PagerdutyURL")
-	assertEquals(t, defaultReceiver, config.Route.Receiver, "Route.Receiver")
-	assertEquals(t, "30s", config.Route.GroupWait, "Route.GroupWait")
-	assertEquals(t, "5m", config.Route.GroupInterval, "Route.GroupInterval")
-	assertEquals(t, "12h", config.Route.RepeatInterval, "Route.RepeatInterval")
-	assertEquals(t, 0, len(config.Route.Routes), "Route.Routes")
-	assertEquals(t, 1, len(config.Receivers), "Receivers")
-
-	verifyNullReceiver(t, config.Receivers)
-}
-
-func Test_createAlertManagerConfig_WithKey_WithoutURL(t *testing.T) {
-	pdKey := "poiuqwer78902345"
-	wdURL := ""
-
-	config := createAlertManagerConfig(pdKey, wdURL)
-
-	// verify static things
-	assertEquals(t, "5m", config.Global.ResolveTimeout, "Global.ResolveTimeout")
-	assertEquals(t, pagerdutyURL, config.Global.PagerdutyURL, "Global.PagerdutyURL")
-	assertEquals(t, defaultReceiver, config.Route.Receiver, "Route.Receiver")
-	assertEquals(t, "30s", config.Route.GroupWait, "Route.GroupWait")
-	assertEquals(t, "5m", config.Route.GroupInterval, "Route.GroupInterval")
-	assertEquals(t, "12h", config.Route.RepeatInterval, "Route.RepeatInterval")
-	assertEquals(t, 1, len(config.Route.Routes), "Route.Routes")
-	assertEquals(t, 3, len(config.Receivers), "Receivers")
-
-	verifyNullReceiver(t, config.Receivers)
-
-	verifyPagerdutyRoute(t, config.Route.Routes[0])
-	verifyPagerdutyReceivers(t, pdKey, config.Receivers)
-}
-
-func Test_createAlertManagerConfig_WithKey_WithURL(t *testing.T) {
-	pdKey := "poiuqwer78902345"
-	wdURL := "http://theinterwebs"
-
-	config := createAlertManagerConfig(pdKey, wdURL)
-
-	// verify static things
-	assertEquals(t, "5m", config.Global.ResolveTimeout, "Global.ResolveTimeout")
-	assertEquals(t, pagerdutyURL, config.Global.PagerdutyURL, "Global.PagerdutyURL")
-	assertEquals(t, defaultReceiver, config.Route.Receiver, "Route.Receiver")
-	assertEquals(t, "30s", config.Route.GroupWait, "Route.GroupWait")
-	assertEquals(t, "5m", config.Route.GroupInterval, "Route.GroupInterval")
-	assertEquals(t, "12h", config.Route.RepeatInterval, "Route.RepeatInterval")
-	assertEquals(t, 2, len(config.Route.Routes), "Route.Routes")
-	assertEquals(t, 4, len(config.Receivers), "Receivers")
-
-	verifyNullReceiver(t, config.Receivers)
-
-	verifyPagerdutyRoute(t, config.Route.Routes[0])
-	verifyPagerdutyReceivers(t, pdKey, config.Receivers)
-
-	verifyWatchdogRoute(t, config.Route.Routes[1])
-	verifyWatchdogReceiver(t, wdURL, config.Receivers)
-}
-
-func Test_createAlertManagerConfig_WithoutKey_WithURL(t *testing.T) {
-	pdKey := ""
-	wdURL := "http://theinterwebs"
-
-	config := createAlertManagerConfig(pdKey, wdURL)
-
-	// verify static things
-	assertEquals(t, "5m", config.Global.ResolveTimeout, "Global.ResolveTimeout")
-	assertEquals(t, pagerdutyURL, config.Global.PagerdutyURL, "Global.PagerdutyURL")
-	assertEquals(t, defaultReceiver, config.Route.Receiver, "Route.Receiver")
-	assertEquals(t, "30s", config.Route.GroupWait, "Route.GroupWait")
-	assertEquals(t, "5m", config.Route.GroupInterval, "Route.GroupInterval")
-	assertEquals(t, "12h", config.Route.RepeatInterval, "Route.RepeatInterval")
-	assertEquals(t, 1, len(config.Route.Routes), "Route.Routes")
-	assertEquals(t, 2, len(config.Receivers), "Receivers")
-
-	verifyNullReceiver(t, config.Receivers)
-	verifyWatchdogRoute(t, config.Route.Routes[0])
-	verifyWatchdogReceiver(t, wdURL, config.Receivers)
 }
 
 // createSecret creates a fake Secret to use in testing.
@@ -350,13 +90,13 @@ func Test_createPagerdutySecret_Create(t *testing.T) {
 	pdKey := "asdaidsgadfi9853"
 	wdURL := "http://theinterwebs/asdf"
 
-	configExpected := createAlertManagerConfig(pdKey, wdURL)
+	configExpected := utility.CreateAlertManagerConfig(pdKey, wdURL)
 
 	// prepare environment
 	reconciler := createReconciler()
 	createNamespace(reconciler, t)
-	createSecret(reconciler, secretNamePD, secretKeyPD, pdKey)
-	createSecret(reconciler, secretNameDMS, secretKeyDMS, wdURL)
+	createSecret(reconciler, config.SecretNamePD, secretKeyPD, pdKey)
+	createSecret(reconciler, config.SecretNameDMS, secretKeyDMS, wdURL)
 
 	// reconcile (one event should config everything)
 	req := createReconcileRequest(reconciler, "pd-secret")
@@ -365,7 +105,7 @@ func Test_createPagerdutySecret_Create(t *testing.T) {
 	// read config and a copy for comparison
 	configActual := readAlertManagerConfig(reconciler, req)
 
-	assertEquals(t, configExpected, configActual, "Config Deep Comparison")
+	utility.AssertEquals(t, configExpected, configActual, "Config Deep Comparison")
 }
 
 // Test updating the config and making sure it is updated as expected
@@ -373,30 +113,30 @@ func Test_createPagerdutySecret_Update(t *testing.T) {
 	pdKey := "asdaidsgadfi9853"
 	wdURL := "http://theinterwebs/asdf"
 
-	configExpected := createAlertManagerConfig(pdKey, wdURL)
+	configExpected := utility.CreateAlertManagerConfig(pdKey, wdURL)
 
 	// prepare environment
 	reconciler := createReconciler()
 	createNamespace(reconciler, t)
-	createSecret(reconciler, secretNamePD, secretKeyPD, pdKey)
+	createSecret(reconciler, config.SecretNamePD, secretKeyPD, pdKey)
 
 	// reconcile (one event should config everything)
-	req := createReconcileRequest(reconciler, secretNamePD)
+	req := createReconcileRequest(reconciler, config.SecretNamePD)
 	reconciler.Reconcile(*req)
 
 	// verify what we have configured is NOT what we expect at the end (we have updates to do still)
 	configActual := readAlertManagerConfig(reconciler, req)
-	assertNotEquals(t, configExpected, configActual, "Config Deep Comparison")
+	utility.AssertNotEquals(t, configExpected, configActual, "Config Deep Comparison")
 
 	// update environment
-	createSecret(reconciler, secretNameDMS, secretKeyDMS, wdURL)
-	req = createReconcileRequest(reconciler, secretNameDMS)
+	createSecret(reconciler, config.SecretNameDMS, secretKeyDMS, wdURL)
+	req = createReconcileRequest(reconciler, config.SecretNameDMS)
 	reconciler.Reconcile(*req)
 
 	// read config and compare
 	configActual = readAlertManagerConfig(reconciler, req)
 
-	assertEquals(t, configExpected, configActual, "Config Deep Comparison")
+	utility.AssertEquals(t, configExpected, configActual, "Config Deep Comparison")
 }
 
 func Test_ReconcileSecrets(t *testing.T) {
@@ -484,29 +224,29 @@ func Test_ReconcileSecrets(t *testing.T) {
 
 		// Create the secrets for this specific test.
 		if tt.amExists {
-			writeAlertManagerConfig(reconciler, createAlertManagerConfig("", ""))
+			writeAlertManagerConfig(reconciler, utility.CreateAlertManagerConfig("", ""))
 		}
 		if tt.dmsExists {
 			wdURL = "https://hjklasdf09876"
-			createSecret(reconciler, secretNameDMS, secretKeyDMS, wdURL)
+			createSecret(reconciler, config.SecretNameDMS, secretKeyDMS, wdURL)
 		}
 		if tt.otherExists {
 			createSecret(reconciler, "other", "key", "asdfjkl")
 		}
 		if tt.pdExists {
 			pdKey = "asdfjkl123"
-			createSecret(reconciler, secretNamePD, secretKeyPD, pdKey)
+			createSecret(reconciler, config.SecretNamePD, secretKeyPD, pdKey)
 		}
 
-		configExpected := createAlertManagerConfig(pdKey, wdURL)
+		configExpected := utility.CreateAlertManagerConfig(pdKey, wdURL)
 
-		req := createReconcileRequest(reconciler, secretNameAlertmanager)
+		req := createReconcileRequest(reconciler, config.SecretNameAlertmanager)
 		reconciler.Reconcile(*req)
 
 		// load the config and check it
 		configActual := readAlertManagerConfig(reconciler, req)
 
 		// NOTE compare of the objects will fail when no secrets are created for some reason, so using .String()
-		assertEquals(t, configExpected.String(), configActual.String(), tt.name)
+		utility.AssertEquals(t, configExpected.String(), configActual.String(), tt.name)
 	}
 }

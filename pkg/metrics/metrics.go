@@ -30,23 +30,23 @@ const (
 
 var (
 	metricPDSecretExists = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "pd_secret_exists",
+		Name: "camo_secret_exists_pd",
 		Help: "Pager Duty secret exists",
 	}, []string{"name"})
 	metricDMSSecretExists = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "dms_secret_exists",
+		Name: "camo_secret_exists_dms",
 		Help: "Dead Man's Snitch secret exists",
 	}, []string{"name"})
 	metricAMSecretExists = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "am_secret_exists",
+		Name: "camo_secret_exists_am",
 		Help: "AlertManager Config secret exists",
 	}, []string{"name"})
 	metricAMSecretContainsPD = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "am_secret_contains_pd",
+		Name: "camo_secret_configured_pd",
 		Help: "AlertManager Config contains configuration for Pager Duty",
 	}, []string{"name"})
 	metricAMSecretContainsDMS = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "am_secret_contains_dms",
+		Name: "camo_secret_configured_dms",
 		Help: "AlertManager Config contains configuration for Dead Man's Snitch",
 	}, []string{"name"})
 
@@ -79,71 +79,47 @@ func RegisterMetrics() error {
 	return nil
 }
 
+// secretExists check if a secret exists in the list of secrets.  Returns 0 if it doesn't exist, 1 if it does exist.
+func secretExists(secretname string, list *corev1.SecretList) int {
+	for _, secret := range list.Items {
+		if secret.Name == secretname {
+			return 1
+		}
+	}
+
+	return 0
+}
+
+// secretConfigured check if a secret is configured.  Returns 0 if it isn't configured, 1 if it is configured
+func secretConfigured(secretname string, cfg *alertmanager.Config) int {
+	for _, receiver := range cfg.Receivers {
+		if receiver.Name == config.ReceiverPagerduty && secretname == config.SecretNamePD {
+			return 1
+		}
+
+		if receiver.Name == config.ReceiverWatchdog && secretname == config.SecretNameDMS {
+			return 1
+		}
+	}
+
+	return 0
+}
+
 // UpdateSecretsMetrics updates all metrics related to the existance and contents of Secrets
 // used by configure-alertmanager-operator.
-func UpdateSecretsMetrics(list *corev1.SecretList, amconfig *alertmanager.Config) {
+func UpdateSecretsMetrics(list *corev1.SecretList, cfg *alertmanager.Config) {
+	// does the PD secret exist?
+	metricPDSecretExists.With(prometheus.Labels{"name": config.OperatorName}).Set(float64(secretExists(config.SecretNamePD, list)))
 
-	// Default to false.
-	pdSecretExists := false
-	dmsSecretExists := false
-	amSecretExists := false
-	amSecretContainsPD := false
-	amSecretContainsDMS := false
+	// does the DMS secret exist?
+	metricDMSSecretExists.With(prometheus.Labels{"name": config.OperatorName}).Set(float64(secretExists(config.SecretNameDMS, list)))
 
-	// Update the metric if the secret is found in the SecretList.
-	for _, secret := range list.Items {
-		switch secret.Name {
-		case "pd-secret":
-			pdSecretExists = true
-		case "dms-secret":
-			dmsSecretExists = true
-		case "alertmanager-main":
-			amSecretExists = true
-		}
-	}
+	// does the AM secret exist?
+	metricAMSecretExists.With(prometheus.Labels{"name": config.OperatorName}).Set(float64(secretExists(config.SecretNameAlertmanager, list)))
 
-	// Check for the presence of PD and DMS configs inside the AlertManager config and report metrics.
-	if amSecretExists {
-		if pdSecretExists {
-			for _, receiver := range amconfig.Receivers {
-				if receiver.Name == "pagerduty" {
-					amSecretContainsPD = true
-				}
-			}
-		}
-		if dmsSecretExists {
-			for _, receiver := range amconfig.Receivers {
-				if receiver.Name == "watchdog" {
-					amSecretContainsDMS = true
-				}
-			}
-		}
-	}
+	// is the PD secret configured?
+	metricAMSecretContainsPD.With(prometheus.Labels{"name": config.OperatorName}).Set(float64(secretConfigured(config.SecretNamePD, cfg)))
 
-	// Only set metrics once per run.
-	if pdSecretExists {
-		metricPDSecretExists.With(prometheus.Labels{"name": config.OperatorName}).Set(float64(1))
-	} else {
-		metricPDSecretExists.With(prometheus.Labels{"name": config.OperatorName}).Set(float64(0))
-	}
-	if dmsSecretExists {
-		metricDMSSecretExists.With(prometheus.Labels{"name": config.OperatorName}).Set(float64(1))
-	} else {
-		metricDMSSecretExists.With(prometheus.Labels{"name": config.OperatorName}).Set(float64(0))
-	}
-	if amSecretExists {
-		metricAMSecretExists.With(prometheus.Labels{"name": config.OperatorName}).Set(float64(1))
-	} else {
-		metricAMSecretExists.With(prometheus.Labels{"name": config.OperatorName}).Set(float64(0))
-	}
-	if amSecretContainsPD {
-		metricAMSecretContainsPD.With(prometheus.Labels{"name": config.OperatorName}).Set(float64(1))
-	} else {
-		metricAMSecretContainsPD.With(prometheus.Labels{"name": config.OperatorName}).Set(float64(0))
-	}
-	if amSecretContainsDMS {
-		metricAMSecretContainsDMS.With(prometheus.Labels{"name": config.OperatorName}).Set(float64(1))
-	} else {
-		metricAMSecretContainsDMS.With(prometheus.Labels{"name": config.OperatorName}).Set(float64(0))
-	}
+	// is the DMS secret configured?
+	metricAMSecretContainsDMS.With(prometheus.Labels{"name": config.OperatorName}).Set(float64(secretConfigured(config.SecretNameDMS, cfg)))
 }

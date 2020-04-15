@@ -15,6 +15,36 @@
 package config
 
 const (
-	OperatorName      string = "configure-alertmanager-operator"
+	// OperatorName the name of this operator
+	OperatorName string = "configure-alertmanager-operator"
+
+	// OperatorNamespace the namespace the operator is deployed in
 	OperatorNamespace string = "openshift-monitoring"
+
+	// SecretNamePD the name of the PagerDuty secret
+	SecretNamePD = "pd-secret"
+
+	// SecretNameDMS the name of the Dead Man's Snitch secret
+	SecretNameDMS = "dms-secret"
+
+	// SecretNameAlertmanager the name of the AlertManager secret
+	SecretNameAlertmanager = "alertmanager-main"
+
+	// ReceiverNull anything routed to "null" receiver does not get routed to PD
+	ReceiverNull = "null"
+
+	// ReceiverMakeItWarning anything routed to "make-it-warning" receiver has severity=warning
+	ReceiverMakeItWarning = "make-it-warning"
+
+	// ReceiverPagerduty anything routed to "pagerduty" will alert/notify SREP
+	ReceiverPagerduty = "pagerduty"
+
+	// ReceiverWatchdog anything going to Dead Man's Snitch (watchdog)
+	ReceiverWatchdog = "watchdog"
+
+	// DefaultReceiver the default receiver used by the route used for pagerduty
+	DefaultReceiver = ReceiverNull
+
+	// PagerdutyURL global config for alertmanager config PagerdutyURL
+	PagerdutyURL = "https://events.pagerduty.com/v2/enqueue"
 )
