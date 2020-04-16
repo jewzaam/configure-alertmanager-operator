@@ -21,7 +21,10 @@ import (
 	alertmanager "github.com/openshift/configure-alertmanager-operator/pkg/types"
 	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
+	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 )
+
+var log = logf.Log.WithName("metrics")
 
 const (
 	// MetricsEndpoint is the port to export metrics on
@@ -30,23 +33,23 @@ const (
 
 var (
 	metricPDSecretExists = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "camo_secret_exists_pd",
+		Name: "pd_secret_exists",
 		Help: "Pager Duty secret exists",
 	}, []string{"name"})
 	metricDMSSecretExists = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "camo_secret_exists_dms",
+		Name: "dms_secret_exists",
 		Help: "Dead Man's Snitch secret exists",
 	}, []string{"name"})
 	metricAMSecretExists = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "camo_secret_exists_am",
+		Name: "am_secret_exists",
 		Help: "AlertManager Config secret exists",
 	}, []string{"name"})
 	metricAMSecretContainsPD = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "camo_secret_configured_pd",
+		Name: "am_secret_contains_pd",
 		Help: "AlertManager Config contains configuration for Pager Duty",
 	}, []string{"name"})
 	metricAMSecretContainsDMS = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "camo_secret_configured_dms",
+		Name: "am_secret_contains_dms",
 		Help: "AlertManager Config contains configuration for Dead Man's Snitch",
 	}, []string{"name"})
 
@@ -83,10 +86,12 @@ func RegisterMetrics() error {
 func secretExists(secretname string, list *corev1.SecretList) int {
 	for _, secret := range list.Items {
 		if secret.Name == secretname {
+			log.Info("secretExists", "secret", secretname, "return", "1")
 			return 1
 		}
 	}
 
+	log.Info("secretExists", "secret", secretname, "return", "0")
 	return 0
 }
 
@@ -94,14 +99,17 @@ func secretExists(secretname string, list *corev1.SecretList) int {
 func secretConfigured(secretname string, cfg *alertmanager.Config) int {
 	for _, receiver := range cfg.Receivers {
 		if receiver.Name == config.ReceiverPagerduty && secretname == config.SecretNamePD {
+			log.Info("secretConfigured", "secret", secretname, "return", "1")
 			return 1
 		}
 
 		if receiver.Name == config.ReceiverWatchdog && secretname == config.SecretNameDMS {
+			log.Info("secretConfigured", "secret", secretname, "return", "1")
 			return 1
 		}
 	}
 
+	log.Info("secretConfigured", "secret", secretname, "return", "0")
 	return 0
 }
 

@@ -11,7 +11,7 @@ spec:
       annotations:
         message: "Mismatch between DMS secret and DMS AlertManager config"
         link_url: "https://access.redhat.com/articles/4165971"
-      expr: configure_alertmanager_opeartor_secret_exists{secret="dms-secret"} + configure_alertmanager_operator_secret_configured{secret="dms-secret"} == 1
+      expr: dms_secret_exists + am_secret_contains_dms == 1
       for: 5m
       labels:
         severity: critical
@@ -19,7 +19,7 @@ spec:
       annotations:
         message: "Mismatch between PD secret and PD AlertManager config"
         link_url: "https://access.redhat.com/articles/4165971"
-      expr: configure_alertmanager_opeartor_secret_exists{secret="pd-secret"} + configure_alertmanager_operator_secret_configured{secret="pd-secret"} == 1
+      expr: pd_secret_exists + am_secret_contains_pd == 1
       for: 5m
       labels:
         severity: critical
@@ -27,7 +27,7 @@ spec:
       annotations:
         message: "Alertmanager config secret does not exist"
         link_url: "https://access.redhat.com/articles/4165971"
-      expr: configure_alertmanager_opeartor_secret_exists{secret="alertmanager-main"} == 0
+      expr: am_secret_exists == 0
       for: 5m
       labels:
         severity: critical
